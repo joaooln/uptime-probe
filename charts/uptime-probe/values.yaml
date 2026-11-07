@@ -1,0 +1,52 @@
+image:
+  repository: ghcr.io/joaooln/uptime-probe
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+probe:
+  intervalSeconds: 30
+  timeoutSeconds: 5
+  # URLs monitored from startup
+  targets:
+    - https://www.google.com
+    - https://kubernetes.io
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Requires the Prometheus Operator CRDs (kube-prometheus-stack)
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels:
+    release: monitoring
+
+# Alerts when a monitored target is down (Prometheus Operator)
+prometheusRule:
+  enabled: false
+  labels:
+    release: monitoring
+
+networkPolicy:
+  enabled: true

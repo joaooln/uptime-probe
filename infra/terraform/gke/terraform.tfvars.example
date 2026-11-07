@@ -1,0 +1,4 @@
+project_id        = "my-gcp-project"
+region            = "us-central1"
+cluster_name      = "uptime-probe"
+github_repository = "joaooln/uptime-probe"

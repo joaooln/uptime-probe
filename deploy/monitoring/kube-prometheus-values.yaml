@@ -1,0 +1,30 @@
+# Values for prometheus-community/kube-prometheus-stack (lab sizing).
+# helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+#   -n monitoring --create-namespace -f deploy/monitoring/kube-prometheus-values.yaml
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    # pick up ServiceMonitors/PrometheusRules labelled release=monitoring
+    serviceMonitorSelector:
+      matchLabels:
+        release: monitoring
+    ruleSelector:
+      matchLabels:
+        release: monitoring
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+grafana:
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi

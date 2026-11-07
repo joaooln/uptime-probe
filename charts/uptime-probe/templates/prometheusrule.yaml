@@ -1,0 +1,32 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "uptime-probe.fullname" . }}
+  labels:
+    {{- include "uptime-probe.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: uptime-probe
+      rules:
+        - alert: ProbeTargetDown
+          # max across replicas: every replica probes the same targets
+          expr: max by (target) (probe_target_up) == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{`{{ $labels.target }}`}} is down"
+            description: "{{`{{ $labels.target }}`}} has failed every check for 2 minutes."
+        - alert: ProbeTargetSlow
+          expr: |
+            histogram_quantile(0.95, sum by (target, le) (rate(probe_target_latency_seconds_bucket[5m]))) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{`{{ $labels.target }}`}} p95 latency above 2s"
+{{- end }}

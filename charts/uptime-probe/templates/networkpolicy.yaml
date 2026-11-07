@@ -1,0 +1,18 @@
+{{- if .Values.networkPolicy.enabled }}
+# Ingress only on the HTTP port; egress allowed (the service must reach the monitored URLs).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "uptime-probe.fullname" . }}
+  labels:
+    {{- include "uptime-probe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "uptime-probe.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+{{- end }}

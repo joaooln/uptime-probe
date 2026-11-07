@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    name: Lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+
+  chart:
+    name: Helm lint & schema validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/uptime-probe
+      - name: Validate rendered manifests against Kubernetes schemas
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          helm template ci charts/uptime-probe | ./kubeconform -strict -summary -kubernetes-version 1.31.0
+
+  image:
+    name: Build, scan & push image
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan image for vulnerabilities (fails on CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Push to GHCR (main only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # also tag with the chart's appVersion so `helm install` works with default values
+          APP_VERSION=$(awk -F'"' '/^appVersion:/ {print $2}' charts/uptime-probe/Chart.yaml)
+          for tag in latest "$APP_VERSION"; do
+            docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+          docker push "$IMAGE:${{ github.sha }}"
+
+  e2e:
+    name: Deploy to kind & smoke test
+    needs: [test, chart]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: ci
+      - name: Build image and load it into kind
+        run: |
+          docker build -t uptime-probe:ci .
+          kind load docker-image uptime-probe:ci --name ci
+      - name: Install chart
+        run: |
+          helm upgrade --install probe charts/uptime-probe \
+            --set image.repository=uptime-probe --set image.tag=ci --set image.pullPolicy=Never \
+            --set autoscaling.enabled=false --set replicaCount=1 \
+            --set 'probe.targets={http://localhost:8080/healthz}' \
+            --wait --timeout 3m
+          kubectl get pods -o wide
+      - name: Smoke test
+        run: |
+          kubectl port-forward svc/probe-uptime-probe 8080:80 &
+          sleep 3
+          curl -sf localhost:8080/readyz
+          curl -sf -X POST localhost:8080/targets/check | tee /tmp/check.json
+          grep -q '"up":true' /tmp/check.json
+          curl -sf localhost:8080/metrics | grep probe_target_up
+      - name: Debug on failure
+        if: failure()
+        run: kubectl describe pods; kubectl logs -l app.kubernetes.io/name=uptime-probe --tail=100
