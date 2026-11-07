@@ -11,6 +11,10 @@ the same job I do in production with Uptime Kuma, rebuilt here as cloud-native c
 
 ## Architecture
 
+![uptime-probe architecture](docs/architecture.png)
+
+<details><summary>Detailed flow (Mermaid)</summary>
+
 ```mermaid
 flowchart LR
   dev[git push] --> gha[GitHub Actions]
@@ -31,6 +35,8 @@ flowchart LR
   gke --- K8s
   app -->|HTTP checks| ext((monitored URLs))
 ```
+
+</details>
 
 ## What is in the repo
 
